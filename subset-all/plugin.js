@@ -7,7 +7,24 @@ arc.run(['$rootScope', function ($rootScope) {
         description: "This plugin can be used to search any TM1 objects",
         author: "Cubewise",
         url: "https://github.com/cubewise-code/arc-plugins",
-        version: "1.0.0"
+        version: "1.0.1"
+    });
+
+}]);
+
+arc.run(["$dialogs", function ($dialogs) {
+
+    $dialogs.registerDialog("cubewiseSubsetDeleteDialog", {
+        title: "Delete the following subsets",
+        directive: "cubewiseSubsetDeleteForm",
+        icon: "fa-trash",
+        size: "medium",
+        okButtonLabel: "DELETE",
+        okButtonClass: "btn-danger",
+        // Once the delete has run the results are shown, so OK is disabled
+        okButtonDisabled: function (data, options) {
+            return !!(data.messages && data.messages.length > 0);
+        }
     });
 
 }]);
@@ -23,7 +40,7 @@ arc.directive("cubewiseSubset", function () {
         link: function ($scope, element, attrs) {
 
         },
-        controller: ["$scope", "$rootScope", "$http", "$tm1", "$translate", "$timeout", "ngDialog",function ($scope, $rootScope, $http, $tm1, $translate, $timeout,ngDialog) {
+        controller: ["$scope", "$rootScope", "$http", "$tm1", "$translate", "$timeout", "$dialogs", function ($scope, $rootScope, $http, $tm1, $translate, $timeout, $dialogs) {
 
             // Store the active tab index
             $scope.selections = {
@@ -63,66 +80,56 @@ arc.directive("cubewiseSubset", function () {
                 }
             };
 
-                     //OPEN MODAL WITH VIEWS TO BE DELETED
-         $scope.openModalSubset = function () {
-            var dialog = ngDialog.open({
-               className: "ngdialog-theme-default medium",
-               template: "__/plugins/subset-all/m-delete-subset.html",
-               name: "Subsets",
-               scope: $scope,
-               controller: ['$rootScope', '$scope', function ($rootScope, $scope) {
-                  $scope.subsets = $scope.ngDialogData.subsets;
+            // OPEN DIALOG WITH SUBSETS TO BE DELETED
+            $scope.openModalSubset = function () {
+                $dialogs.showDialog("cubewiseSubsetDeleteDialog", { subsets: _.clone($scope.subsetsToDelete) }, null, function (result) {
+                    $scope.deleteSubsets(result.data);
+                    // Returning true keeps the dialog open so the results can be read
+                    return true;
+                });
+            };
 
-                  //DELETE ONE SUBSET
-                  $scope.deleteSubset = function(index){
-                     subset = $scope.subsetsToDelete[index];
-                     var subsetFullName = subset.fqn;
-                     var semiColumn = subsetFullName.indexOf(":");
-                     var dimension = subsetFullName.substr(0, semiColumn);
-                     var hierarchyAndSubset = subsetFullName.substr(semiColumn + 1, subsetFullName.length - semiColumn + 1);
-                     var semiColumn2 = hierarchyAndSubset.indexOf(":");
-                     var hierarchy = hierarchyAndSubset.substr(0, semiColumn2);
-                     var subset = hierarchyAndSubset.substr(semiColumn2 + 1, hierarchyAndSubset.length - semiColumn2 + 1);
-                     $http.delete(encodeURIComponent($scope.instance) + "/Dimensions('" + dimension + "')/Hierarchies('" + hierarchy + "')/Subsets('" + subset + "')").then(function (result) {
-                        if (result.status == 204) {
-                           // Add subsets to subsetsDeleted list
-                           $scope.subsetsDeleted.push(subsetFullName);
-                           //Remove subset from subset to delete list
-                           _.remove($scope.subsetsToDelete, function (i) {
-                              return i.fqn === subsetFullName;
-                           });
-                           var message = {class:'success',
-                                          icon:'fa-check-square-o',
-                                          message: subsetFullName+ " has been deleted"};
-                           $scope.messages.push(message);
-                        }else{
-                           //Can't delete subset
-                           $scope.errorMessage = "Delete "+subsetFullName+" failed because "+result.data.error.message;
-                           var message = {class:"warning",
-                                          icon:'fa-warning',
-                                          message:"Delete "+subsetFullName+" failed because "+result.data.error.message};
-                           $scope.messages.push(message);
-                        }
-                     });
-                  }
-                  //DELETE SUBSETS
-                  $scope.deleteSubsets = function () {
-                     // Delete subsets
-                     //Debugger;
-                     $scope.subsetsDeleted = [];
-                     $scope.messages = [];
-                     for (var s in $scope.subsetsToDelete) {
-                        $scope.deleteSubset(s);
-                     }
-                  }
-               }],
-               data: {
-                  subsets: $scope.subsetsToDelete,
-                  subsetsDeleted: $scope.subsetsDeleted,
-                  errorMessage: $scope.errorMessage,
-               }
-            });
-         };
+            // DELETE ONE SUBSET
+            $scope.deleteSubset = function (subset, data) {
+                var subsetFullName = subset.fqn;
+                var semiColumn = subsetFullName.indexOf(":");
+                var dimension = subsetFullName.substr(0, semiColumn);
+                var hierarchyAndSubset = subsetFullName.substr(semiColumn + 1);
+                var semiColumn2 = hierarchyAndSubset.indexOf(":");
+                var hierarchy = hierarchyAndSubset.substr(0, semiColumn2);
+                var subsetName = hierarchyAndSubset.substr(semiColumn2 + 1);
+                $http.delete(encodeURIComponent($scope.instance) + "/Dimensions('" + dimension + "')/Hierarchies('" + hierarchy + "')/Subsets('" + subsetName + "')").then(function (result) {
+                    if (result.status == 204) {
+                        // Add subset to subsetsDeleted list
+                        data.subsetsDeleted.push(subsetFullName);
+                        // Remove subset from subset to delete list
+                        _.remove($scope.subsetsToDelete, function (i) {
+                            return i.fqn === subsetFullName;
+                        });
+                        data.messages.push({
+                            class: "success",
+                            icon: "fa-check-square-o",
+                            message: subsetFullName + " has been deleted"
+                        });
+                    } else {
+                        // Can't delete subset
+                        data.messages.push({
+                            class: "warning",
+                            icon: "fa-warning",
+                            message: "Delete " + subsetFullName + " failed because " + result.data.error.message
+                        });
+                    }
+                });
+            };
+
+            // DELETE SUBSETS
+            $scope.deleteSubsets = function (data) {
+                data.subsetsDeleted = [];
+                data.messages = [];
+                _.forEach(data.subsets, function (subset) {
+                    $scope.deleteSubset(subset, data);
+                });
+            };
 
             // GET DIMENSION DATA
             $scope.getAllSubsets = function () {
@@ -183,5 +190,18 @@ arc.directive("cubewiseSubset", function () {
 
 
         }]
+    };
+});
+
+arc.directive("cubewiseSubsetDeleteForm", function () {
+    return {
+        restrict: "EA",
+        replace: true,
+        scope: {
+            data: "=arcModelData",
+            options: "=arcOptions",
+            dialog: "=arcDialog"
+        },
+        templateUrl: "__/plugins/subset-all/m-delete-subset.html"
     };
 });
